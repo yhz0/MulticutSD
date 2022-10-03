@@ -1,8 +1,0 @@
-{
-    "MAX_ITER": 1000,
-    "MIN_QUAD_SCALAR": 0.001,
-    "MAX_QUAD_SCALAR": 10000.0,
-    "R2": 0.95,
-    "R3": 2.0,
-    "INCUMBENT_IMPROVEMENT": 0.2
-}

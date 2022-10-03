@@ -22,6 +22,7 @@ function build_stage_one()
 
     model.ext[:first_stage_variables] = x
 
+    set_silent(model)
     return model
 end
 
@@ -59,34 +60,24 @@ function build_leo_wyndor_cut(p, noise)::spOneCut
     return spOneCut(alpha, beta)
 end
 
-# struct spProblem
-#     x_init::Vector{Float64}
-
-#     # Inside the first
-#     build_stage_one::Function # () -> first stage model
-#     get_dual_point::Function # (x, obs) -> second stage dual vertex
-#     build_cut::Function # (p, omega) -> spOneCut of dual cut
-#     evaluate_dual::Function # (p, omega, x) -> second stage value function
-
-#     sample_generator::Function # rng -> Vector of sample groups
-#     num_epigraph::Int
-#     epigraph_weights::Vector{Float64}
-
+# function leo_wyndor_iid(rng)
+#     return [rand(rng, dist), rand(rng, dist)]
 # end
 
-function leo_wyndor_iid(rng)
-    return [rand(rng, dist), rand(rng, dist)]
-end
+# prob = spProblem(
+#     [0.0, 0.0],
+#     build_stage_one,
+#     get_dual_point,
+#     build_leo_wyndor_cut,
+#     evaluate_dual,
+#     leo_wyndor_iid,     # Sample Group Generator
+#     2,                  # Number of epigraphs
+#     [0.5, 0.5],         # Epigraph weights
+#     -72.0               # Assumed lower bounds
+# )
+hist = run_sd(prob)
 
-prob = spProblem(
-    [0.0, 0.0],
-    build_stage_one,
-    get_dual_point,
-    build_leo_wyndor_cut,
-    evaluate_dual,
-    leo_wyndor_iid,     # Sample Group Generator
-    2,                  # Number of epigraphs
-    [0.5, 0.5],         # Epigraph weights
-    -72.0               # Assumed lower bounds
-)
-run_sd(prob)
+# Print estm obj
+using DataFrames, Plots, StatsPlots
+result = DataFrame(hist)
+@df result plot(:estimated_obj)

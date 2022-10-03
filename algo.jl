@@ -29,8 +29,7 @@ function incumbent_selection(
     cost_vector::Vector{Float64},
     cut_pools::Vector{Vector{spOneCut}},
     old_cut_pools::Vector{Vector{spOneCut}},
-    pool_weights::Vector{Float64},
-    current_rho::Vector{Float64};
+    pool_weights::Vector{Float64};
     config::spConfig)::Tuple{Bool, Float64}
 
     @assert(length(x_candidate) == length(x_incumb) == length(cost_vector))
@@ -51,15 +50,14 @@ function incumbent_selection(
     r4 += (cost_vector' * x_incumb)
 
     L = r1 - r2
-    R = r3 - r4
+    R = r3 - r4 # gamma
+
+    # config.INCUMBENT_IMPROVEMENT is the same as R1
     accept::Bool = L < config.INCUMBENT_IMPROVEMENT * R
 
-    # Now calculate current scalar rho
-    if L < config.R2 * R
+    ratio = L/R
 
-    end
-    
-    return accept
+    return accept, ratio
 end
 
 function argmax_procedure(
@@ -130,7 +128,7 @@ function run_sd(prob::spProblem; config::spConfig=DEFAULT_CONFIG)
     disabled_cuts = Set{Int}()
 
     # initial regularization strength
-    rho = 0.1
+    rho = config.INITIAL_QUAD_SCALAR
 
     # outputs
     history = []
@@ -201,12 +199,15 @@ function run_sd(prob::spProblem; config::spConfig=DEFAULT_CONFIG)
 
         # Add regularization term
         add_regularization!(master, rho, x_incumb, xref)
-        optimize!(master)
-
-        @assert(termination_status(master) == OPTIMAL, "master solver error: $(termination_status(master))")
-
-        @show objective_value(master)
-        # @show value(master.ext[:original_obj])
+        
+        # Solve master
+        try
+            optimize!(master)
+            @assert(termination_status(master) == OPTIMAL, "master solver error: $(termination_status(master))")
+        catch e
+            print(master)
+            rethrow(e)
+        end
 
         # Now we can identify which cuts are disabled and remove them
         # by setting a "disabled" flag
@@ -222,8 +223,12 @@ function run_sd(prob::spProblem; config::spConfig=DEFAULT_CONFIG)
             end
 
             # set remove_flag if all slack for specific instance
+            # remove_flag = all(
+            #     value(cut[i].first) != normalized_rhs(cut[i].first) for i in 1:prob.num_epigraph
+            # )
+            BINDING_THRESHOLD = 0.001
             remove_flag = all(
-                value(cut[i].first) != normalized_rhs(cut[i].first) for i in 1:prob.num_epigraph
+                abs(dual(cut[i].first)) < BINDING_THRESHOLD for i in 1:prob.num_epigraph
             )
 
             # If remove_flag (slackness) and not incumbent and not current Iteration
@@ -239,24 +244,37 @@ function run_sd(prob::spProblem; config::spConfig=DEFAULT_CONFIG)
         x_candidate = value.(xref)
 
         # test candidate
-        if incumbent_selection(x_candidate, x_incumb, cost_vector, cut_pools, last_cut_pools, prob.epigraph_weights; config=config)
+        # accept: whether we should accept next
+        accept, ratio = incumbent_selection(x_candidate, x_incumb, cost_vector, cut_pools, last_cut_pools, prob.epigraph_weights; config=config)
+        if accept
             # replace incumbent
             x_incumb = copy(x_candidate)
             incumb_iter = k
             @info "Replaced incumbent"
+
+            # Update rho
+            rho /= (config.R2 * config.R3)
+        else
+            rho *= config.R2
         end
 
+        rho = clamp(rho, config.MIN_QUAD_SCALAR, config.MAX_QUAD_SCALAR)
+
+        @info rho
         @info "x_candidate: $x_candidate"
         @info "x_incumb ($incumb_iter): $x_incumb"
 
-        # Retain the cut pool
+        # Update the last cut pool with the current one
         for i = 1:prob.num_epigraph
             last_cut_pools[i] = copy(cut_pools[i])
         end
 
-        # push record stuff
-        # push!(history, value(master.ext[:original_obj]))
-
+        # Collect everything we want to know here
+        record = Dict{Symbol, Any}()
+        record[:master_obj] = objective_value(master)
+        record[:estimated_obj] = value(master.ext[:original_obj])
+        record[:rho] = rho
+        push!(history, record)
     end
     return history
 end

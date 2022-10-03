@@ -112,11 +112,15 @@ const d_dist = product_distribution(
 function observe(rng::AbstractRNG)
     u = rand(rng, d_dist)
     v = rand(rng, d_dist)
-    # # Antithetic
-    # diff = u - mu
-    # v = mu - diff
     return [u, v]
 end
+
+function antithetic_observe(rng::AbstractRNG)
+    u = rand(rng, d_dist)
+    v = rand(rng, d_dist)
+    return [u, v]
+end
+
 
 # Number of epigraphs
 num_epigraph = 2
@@ -139,4 +143,31 @@ prob = spProblem(
     lower_bound         # Assumed lower bounds
 )
 
-run_sd(prob)
+av_prob = spProblem(
+    initial_x,
+    build_stage_one,
+    get_dual_point,
+    build_cut,
+    evaluate_dual,
+    antithetic_observe, # Antithetic
+    num_epigraph,       # Number of epigraphs
+    epigraph_weights,   # Epigraph weights
+    lower_bound         # Assumed lower bounds
+)
+
+# No r2/r3; rho = 1.0
+myconfig = spConfig(1000, 0.0001, 10000.0, 0.01,
+    0.2, 0.95, 2.0, Random.GLOBAL_RNG)
+
+hist = run_sd(prob; config=myconfig)
+av_hist = run_sd(av_prob; config=myconfig)
+
+using DataFrames, Plots, StatsPlots
+result = DataFrame(hist)
+av_result = DataFrame(av_hist)
+
+delete!(result, 1:50)
+delete!(av_result, 1:50)
+
+@df result plot(:estimated_obj, color=:blue)
+@df av_result plot!(:estimated_obj, color=:red)
